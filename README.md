@@ -108,6 +108,12 @@ Same as upstream for the normal path: no network calls, nothing written to disk,
 
 The opt-in native-overlay fallback is the one deliberate exception, and it's still narrow: it sends one real keypress to the app that was already focused (nothing else) and leaves it to show its own dialog - kheetsheet never reads or retains anything from it. No network calls or disk writes happen there either. It only ever runs when explicitly triggered - see "Native-overlay fallback" above for the full reasoning on why this exists as opt-in rather than automatic.
 
-## Credit
+## Read more
+"Landing page" of a sort is [here](https://28mm.coffee/kheetsheet), and there's a bit on the [reasoning](https://28mm.coffee/the-reasoning-behind-kheetsheet). 
 
-All of the actual shortcut-reading mechanism is [Doghouse-Mike/kheetsheet](https://github.com/Doghouse-Mike/kheetsheet). This is a port of that idea and that code to a different desktop, not a separate design.
+If you find this useful, and can spare the cash:
+
+<a href='https://ko-fi.com/Y8Y41LC22H' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+
+I'll blow it on some combination of bike parts, nerd things, cameras, and music gear. Or food. [Food is good. ](https://www.youtube.com/watch?v=8bpTejGazqk)
+
