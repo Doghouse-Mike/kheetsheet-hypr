@@ -8,8 +8,6 @@ Same idea, same underlying mechanism (AT-SPI - the same thing screen readers use
 | --- | --- | --- |
 | ![Overlay showing Kate's real menu shortcuts](screenshots/overlay-menu-shortcuts.png) | ![Empty state for an app with no exposed menu](screenshots/overlay-no-shortcuts-found.png) | ![Nautilus's own native shortcuts dialog, triggered from the empty state](screenshots/overlay-native-fallback.png) |
 
-(`preview.png` at the repo root is a copy of the first image above, for the plugin marketplace's listing card.)
-
 ## Status
 
 Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2). Not yet packaged for general install beyond `install.sh`. See `HANDOVER.md` for full development history, decisions, and open items.
