@@ -8,17 +8,6 @@ Same idea, same underlying mechanism (AT-SPI - the same thing screen readers use
 | --- | --- | --- |
 | ![Overlay showing Kate's real menu shortcuts](screenshots/overlay-menu-shortcuts.png) | ![Empty state for an app with no exposed menu](screenshots/overlay-no-shortcuts-found.png) | ![Nautilus's own native shortcuts dialog, triggered from the empty state](screenshots/overlay-native-fallback.png) |
 
-## Status
-
-Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2). Not yet packaged for general install beyond `install.sh`. See `HANDOVER.md` for full development history, decisions, and open items.
-
-## How it's different from upstream
-
-- **No KWin script.** Hyprland's active-window state is queried on demand via `hyprctl activewindow` at the moment the overlay opens, instead of being pushed continuously by a compositor script. Confirmed live that a Quickshell layer-shell overlay never shows up as Hyprland's "active window" even while it holds exclusive keyboard focus, so there's no race between the overlay opening and this query.
-- **No PyQt6 / no Qt in the daemon at all.** The daemon is a pure D-Bus backend (AT-SPI + a GLib mainloop); the overlay itself is a native Omarchy Quickshell plugin (`manifest.json` + `Kheetsheet.qml`, at the repo root), which speaks `wlr-layer-shell` natively - no XWayland workaround needed (upstream needs one, because Qt-Wayland windows don't honour always-on-top/positioning under KWin).
-- **D-Bus interface is pull-based**: `GetShortcuts() -> JSON` and `InvokeShortcut(index) -> bool`, called by the plugin's QML rather than the daemon pushing to its own in-process overlay.
-
-The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is ported near-verbatim from upstream - it was already 100% compositor-independent.
 
 ## Install
 
@@ -39,6 +28,22 @@ Test without a hotkey at all:
 ```
 omarchy-shell shell toggle doghouse-mike.kheetsheet '{}'
 ```
+
+
+
+
+## Status
+
+Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2) and a separate, definite "potato" class laptop running the same setup. Not yet packaged for general install beyond `install.sh`. See `HANDOVER.md` for full development history, decisions, and open items.
+
+## How it's different from upstream
+
+- **No KWin script.** Hyprland's active-window state is queried on demand via `hyprctl activewindow` at the moment the overlay opens, instead of being pushed continuously by a compositor script. Confirmed live that a Quickshell layer-shell overlay never shows up as Hyprland's "active window" even while it holds exclusive keyboard focus, so there's no race between the overlay opening and this query.
+- **No PyQt6 / no Qt in the daemon at all.** The daemon is a pure D-Bus backend (AT-SPI + a GLib mainloop); the overlay itself is a native Omarchy Quickshell plugin (`manifest.json` + `Kheetsheet.qml`, at the repo root), which speaks `wlr-layer-shell` natively - no XWayland workaround needed (upstream needs one, because Qt-Wayland windows don't honour always-on-top/positioning under KWin).
+- **D-Bus interface is pull-based**: `GetShortcuts() -> JSON` and `InvokeShortcut(index) -> bool`, called by the plugin's QML rather than the daemon pushing to its own in-process overlay.
+
+The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is ported near-verbatim from upstream - it was already 100% compositor-independent.
+
 
 ## Dependencies
 
