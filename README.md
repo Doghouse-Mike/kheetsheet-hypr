@@ -21,7 +21,13 @@ cd kheetsheet-hypr
 
 This installs the daemon as a systemd user service, copies the plugin into `~/.config/omarchy/plugins/`, and enables it in `~/.config/omarchy/shell.json`. It does **not** bind a hotkey - see the printed instructions at the end (no single default key is safe across every Omarchy install; two different "obvious" defaults were both already taken on the machine this was developed on).
 
-**If you installed this via `omarchy plugin add`/the plugin marketplace's clone-a-repo flow**: that only clones this repo into `~/.config/omarchy/plugins/doghouse-mike.kheetsheet/` and enables the manifest - it does **not** run `install.sh`, so the backend daemon this plugin depends on won't be running yet and the overlay will always show "no shortcuts found." Run `install.sh` from inside that cloned directory (or from a separate clone of this repo) once, manually, to finish setup.
+**Installing via the Omarchy plugin marketplace instead?**
+
+```
+omarchy plugin add https://github.com/Doghouse-Mike/kheetsheet-hypr
+```
+
+This only clones this repo into `~/.config/omarchy/plugins/doghouse-mike.kheetsheet/` and enables the manifest - it does **not** run `install.sh`, so the backend daemon this plugin depends on won't be running yet and the overlay will always show "no shortcuts found." Run `install.sh` from inside that cloned directory (or from a separate clone of this repo) once, manually, to finish setup.
 
 Test without a hotkey at all:
 
