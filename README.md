@@ -8,7 +8,6 @@ Same idea, same underlying mechanism (AT-SPI - the same thing screen readers use
 | --- | --- | --- |
 | ![Overlay showing Kate's real menu shortcuts](screenshots/overlay-menu-shortcuts.png) | ![Empty state for an app with no exposed menu](screenshots/overlay-no-shortcuts-found.png) | ![Nautilus's own native shortcuts dialog, triggered from the empty state](screenshots/overlay-native-fallback.png) |
 
-
 ## Install
 
 ```
@@ -35,9 +34,6 @@ Test without a hotkey at all:
 omarchy-shell shell toggle doghouse-mike.kheetsheet '{}'
 ```
 
-
-
-
 ## Status
 
 Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2) and a separate, definite "potato" class laptop running the same setup. Not yet packaged for general install beyond `install.sh`. See `HANDOVER.md` for full development history, decisions, and open items.
@@ -49,7 +45,6 @@ Early / in development. The daemon and plugin both work end-to-end on the machin
 - **D-Bus interface is pull-based**: `GetShortcuts() -> JSON` and `InvokeShortcut(index) -> bool`, called by the plugin's QML rather than the daemon pushing to its own in-process overlay.
 
 The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is ported near-verbatim from upstream - it was already 100% compositor-independent.
-
 
 ## Dependencies
 
