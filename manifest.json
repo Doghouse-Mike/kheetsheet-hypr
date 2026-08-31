@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "doghouse-mike.kheetsheet",
+  "name": "kheetsheet",
+  "version": "0.1.0",
+  "author": "Doghouse-Mike",
+  "license": "MIT",
+  "description": "Show the focused app's real keyboard shortcuts, read live from its accessibility tree",
+  "kinds": ["overlay"],
+  "entryPoints": {
+    "overlay": "Kheetsheet.qml"
+  }
+}

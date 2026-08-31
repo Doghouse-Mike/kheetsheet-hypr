@@ -1,0 +1,30 @@
+[Unit]
+Description=kheetsheet-hypr daemon (AT-SPI shortcut reader)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m kheetsheet_hyprd
+WorkingDirectory=__DAEMON_DIR__
+Restart=on-failure
+RestartSec=2
+
+# Hardening. No PrivateTmp/ProtectHome/ProtectSystem: those sandbox via mount
+# namespaces and would hide /run/user/<uid> (the D-Bus session bus socket),
+# breaking the daemon outright. Everything below only removes capabilities
+# this daemon has no legitimate use for.
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=graphical-session.target
