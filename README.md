@@ -23,8 +23,12 @@ The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is por
 ## Install
 
 ```
+git clone git@github.com:Doghouse-Mike/kheetsheet-hypr.git
+cd kheetsheet-hypr
 ./install.sh
 ```
+
+(No `git`, or prefer not to use it? Use GitHub's own "Download ZIP" button on this page instead, extract it, and `cd` into the extracted folder before running `./install.sh`.)
 
 This installs the daemon as a systemd user service, copies the plugin into `~/.config/omarchy/plugins/`, and enables it in `~/.config/omarchy/shell.json`. It does **not** bind a hotkey - see the printed instructions at the end (no single default key is safe across every Omarchy install; two different "obvious" defaults were both already taken on the machine this was developed on).
 
