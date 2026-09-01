@@ -7,7 +7,13 @@ from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
 from .hypr import get_active_window
-from .native_overlay import focus_window, send_key_combo, synthetic_input_available
+from .native_overlay import (
+    focus_window,
+    new_window_appeared,
+    send_key_combo,
+    synthetic_input_available,
+    window_snapshot,
+)
 from .service import ensure_accessibility_enabled, invoke_shortcut, shortcuts_for_pid
 
 BUS_NAME = "com.kheetsheet.Daemon"
@@ -80,8 +86,19 @@ class KheetSheetService(dbus.service.Object):
                 "error": "couldn't refocus the original window (it may have closed)",
             })
 
+        before = window_snapshot()
         send_key_combo(["ctrl", "shift"], "slash")
-        return json.dumps({"app": app_id, "ok": True})
+        if not new_window_appeared(before):
+            # The keypress went out fine, but nothing new showed up on
+            # screen - most likely this app just has no shortcuts overlay
+            # of its own bound to Ctrl+Shift+/. Reported as ok:True (the
+            # send itself didn't fail) with shown:False so the caller can
+            # tell "nothing to display" apart from a real error.
+            return json.dumps({
+                "app": app_id, "ok": True, "shown": False,
+                "error": f"{app_id} doesn't seem to have its own shortcuts overlay",
+            })
+        return json.dumps({"app": app_id, "ok": True, "shown": True})
 
 
 def main():

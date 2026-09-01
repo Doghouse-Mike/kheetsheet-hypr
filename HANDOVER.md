@@ -13,8 +13,33 @@ What's not done yet:
 4. **Click-to-invoke (the normal AT-SPI path) was verified by code review and unit-level testing, not by actually clicking a real menu item live** — deliberately avoided triggering a real UI action on your machine unattended (e.g. Okular's "Open…" would have popped a real file dialog). The native-overlay rows are explicitly non-invokable by design (no real action behind them), so this gap only applies to the original menu-based path.
 5. **No git commits yet** — repo has real content but is uncommitted, waiting for you to look it over first.
 6. Only tested the native-overlay fallback against one app (Nautilus). Should hold for other libadwaita apps with the same dialog convention, but that's inference, not verification - see session 5's "not yet done."
+7. ~~Clicking "Try an app's own overlay" always reported success, even for apps with no such dialog (e.g. Vivaldi), leaving the panel to just vanish with no feedback.~~ **Done and verified live** — see session 9 below.
 
 Full repo layout: `daemon/kheetsheet_hyprd/` (service.py, hypr.py, native_overlay.py, __main__.py), `manifest.json` + `Kheetsheet.qml` (repo root - moved out of `plugin/doghouse-mike.kheetsheet/` in session 6, see below), `systemd/kheetsheet-hypr-daemon.service`, `install.sh`, `README.md`, `LICENSE`, `screenshots/`.
+
+## Session 9: added the "app has no shortcuts overlay of its own" error message, verified live
+
+Picked up from a prior window that hit unrelated environmental trouble mid-session (dual-monitor screenshot mixup, its own terminal stealing focus, a TUI render desync that made the pane look stuck) — none of it a project bug, and it left a clean, complete implementation with a written handoff before its window was closed.
+
+**Problem:** clicking "Try {app}'s own shortcuts overlay" sent the synthetic `Ctrl+Shift+/` and always reported success, even when the target app has no such dialog — the kheetsheet panel just vanished with no feedback.
+
+**Fix:**
+- `daemon/kheetsheet_hyprd/native_overlay.py`: added `window_snapshot()` (`hyprctl clients` → set of window addresses) and `new_window_appeared(before, settle=0.4)`. Content-blind by design, consistent with session 7's decision not to scrape the triggered dialog — this only checks whether a new window address exists, never what's inside it.
+- `daemon/kheetsheet_hyprd/__main__.py`: `TryNativeOverlay()` snapshots windows before sending the combo, returns `{"ok": true, "shown": false, "error": "<app> doesn't seem to have its own shortcuts overlay"}` when nothing new appears, `{"ok": true, "shown": true}` when something does. `ok:false` stays reserved for real failures (ydotool missing, refocus failed).
+- `Kheetsheet.qml`: `nativeProc.onExited` now also reopens the panel with `"No shortcuts to display — " + error` when `shown` comes back false, mirroring the existing `!ok` reopen branch.
+
+**Verified live, end-to-end, this session:** launched a fresh Vivaldi window (no native shortcuts dialog), focused it via `focus_window()`, toggled the kheetsheet panel via `omarchy-shell shell toggle`, pressed Enter to fire `tryNativeOverlay()`, screenshotted. Panel correctly re-showed with **"No shortcuts to display — vivaldi-stable doesn't seem to have its own shortcuts overlay."** Test app and panel both closed afterward. This was the one thing the prior session's handoff had flagged as not independently confirmed — now confirmed.
+
+**Not done / still open:** no git commits yet (same as every prior session — waiting on final review). Nothing else outstanding on this specific task.
+
+## Related projects found (2026-09-01) — not yet acted on, revisit later
+
+Two other Omarchy plugins came up in the same space, worth a look before/if this project's scope ever expands:
+
+- **[cyprusad/omakeez](https://github.com/cyprusad/omakeez)** — no real overlap. It's a which-key-style overlay for Hyprland/Omarchy's *own* registered keybindings (hold a key to see WM/system-level binds), built by parsing Hyprland's binding table directly. No AT-SPI, no concept of "what app is focused" at all. Different problem space entirely.
+- **[fze-fze/omarchy-shortcut-sheet](https://github.com/fze-fze/omarchy-shortcut-sheet)** — real overlap in the pitch ("tap Super to show shortcuts for the current app or web page"), opposite mechanism. No AT-SPI: it combines a live Hyprland binding scan with **hand-curated, hardcoded shortcut catalogs per named app** (browsers, editors, web services), plus `/proc` child-tree walking for terminal-focused apps to detect what's running and then **parse that tool's own config file directly** (e.g. `~/.claude/keybindings.json` for Claude Code). That last part is exactly the "read the app's own keybinding config" approach upstream kheetsheet's author already considered and rejected as "creepy"/unscalable (see the TL;DR-adjacent notes elsewhere in this doc) — this project just does it anyway, by hand, per app. The one real advantage it has that this project structurally can never match: TUI/terminal apps and web apps have no AT-SPI tree at all, so it covers ground kheetsheet-hypr is permanently locked out of, at the cost of needing a hand-maintained catalog entry for every app it supports.
+
+Not a reason to change approach — just worth a "see also" mention somewhere (README or COMPATIBILITY.md) for terminal-app coverage, if it ever seems worth it.
 
 ## Session 8: retook all three screenshots live, added Dependencies + COMPATIBILITY.md, tested against Strata
 

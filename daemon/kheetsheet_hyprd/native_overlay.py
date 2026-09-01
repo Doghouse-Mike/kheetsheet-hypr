@@ -81,6 +81,38 @@ def synthetic_input_available():
     return shutil.which("ydotool") is not None
 
 
+def window_snapshot():
+    """Addresses of all current toplevel windows, per `hyprctl clients`.
+
+    Used only to detect *whether a new window appeared* after triggering an
+    app's native shortcuts overlay - never to read what's inside it. Kept
+    content-blind on purpose (see HANDOVER.md session 7): this project reads
+    AT-SPI content for its own panel, but the opt-in native-overlay path is
+    meant to trigger the target app's own dialog and leave it alone,
+    unscraped.
+    """
+    try:
+        out = subprocess.run(
+            ["hyprctl", "-j", "clients"], capture_output=True, text=True,
+            timeout=2, check=True,
+        ).stdout
+        return {w["address"] for w in json.loads(out) if "address" in w}
+    except Exception:
+        return set()
+
+
+def new_window_appeared(before, settle=0.4):
+    """True if a window not in `before` exists after a short settle delay.
+
+    GTK4/libadwaita's Ctrl+Shift+/ shortcuts dialog is a real toplevel
+    window, so a new address showing up is a cheap way to tell "the app
+    opened something" apart from "nothing happened" (e.g. the app has no
+    such binding) - without caring what that something is.
+    """
+    time.sleep(settle)
+    return len(window_snapshot() - before) > 0
+
+
 def _ydotool_key(sequence):
     if not synthetic_input_available():
         return False

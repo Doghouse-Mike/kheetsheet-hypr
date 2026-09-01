@@ -141,12 +141,14 @@ Item {
     onExited: function (exitCode) {
       root.loading = false
       var ok = false
+      var shown = true
       var error = "Couldn't reach the kheetsheet daemon."
       if (exitCode === 0) {
         try {
           var envelope = JSON.parse(nativeOut.text)
           var payload = JSON.parse(envelope.data[0])
           ok = payload.ok === true
+          shown = payload.shown !== false
           error = payload.error || "Couldn't open the native overlay."
         } catch (e) {
           error = "Couldn't parse the daemon's response"
@@ -155,6 +157,14 @@ Item {
       if (!ok) {
         root.opened = true
         root.loadError = error
+        rebuildModel()
+        Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+      } else if (!shown) {
+        // The send succeeded but no new window showed up - most likely
+        // this app has no shortcuts overlay of its own. Reopen and say so
+        // plainly instead of just leaving the user looking at their desktop.
+        root.opened = true
+        root.loadError = "No shortcuts to display — " + error
         rebuildModel()
         Qt.callLater(function () { keyCatcher.forceActiveFocus() })
       }
