@@ -3,6 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import "i18n.js" as I18n
 
 // Overlay plugin: shows the currently focused app's real keyboard shortcuts,
 // pulled live from com.kheetsheet.Daemon (this project's own AT-SPI-reading
@@ -67,6 +68,24 @@ Item {
     rebuildModel()
   }
 
+  // Maps one of the daemon's stable error_code values (see __main__.py) to
+  // localized display text. `raw` is the daemon's own English `error`
+  // string, used only as a last-resort fallback for a code this build
+  // doesn't recognize yet (e.g. talking to a newer/older daemon) - never
+  // shown as-is when a real code is present, so this is where all
+  // user-facing error strings actually live, not on the daemon.
+  function resolveDaemonError(code, app, raw) {
+    switch (code) {
+      case "no_active_window": return I18n.tr("no_active_window")
+      case "ydotool_missing": return I18n.tr("ydotool_missing")
+      case "refocus_failed": return I18n.tr("refocus_failed")
+      case "no_native_overlay": return I18n.tr("no_native_overlay", { app: app })
+      case "parse_error": return I18n.tr("parse_error")
+      case "daemon_unreachable": return I18n.tr("daemon_unreachable")
+      default: return raw || I18n.tr("daemon_unreachable")
+    }
+  }
+
   Process {
     id: fetchProc
     command: ["busctl", "--user", "--json=short", "call",
@@ -77,7 +96,7 @@ Item {
     onExited: function (exitCode) {
       root.loading = false
       if (exitCode !== 0) {
-        root.loadError = "Couldn't reach the kheetsheet daemon — is kheetsheet-hyprd running?"
+        root.loadError = I18n.tr("daemon_unreachable")
         root.appName = ""
         root.items = []
         rebuildModel()
@@ -88,9 +107,9 @@ Item {
         var payload = JSON.parse(envelope.data[0])
         root.appName = payload.app || ""
         root.items = payload.items || []
-        root.loadError = root.appName === "" ? "No active window known" : ""
+        root.loadError = root.appName === "" ? I18n.tr("no_active_window") : ""
       } catch (e) {
-        root.loadError = "Couldn't parse the daemon's response"
+        root.loadError = I18n.tr("parse_error")
         root.appName = ""
         root.items = []
       }
@@ -142,21 +161,25 @@ Item {
       root.loading = false
       var ok = false
       var shown = true
-      var error = "Couldn't reach the kheetsheet daemon."
+      var errorCode = "daemon_unreachable"
+      var errorApp = ""
+      var errorRaw = ""
       if (exitCode === 0) {
         try {
           var envelope = JSON.parse(nativeOut.text)
           var payload = JSON.parse(envelope.data[0])
           ok = payload.ok === true
           shown = payload.shown !== false
-          error = payload.error || "Couldn't open the native overlay."
+          errorCode = payload.error_code || ""
+          errorApp = payload.app || ""
+          errorRaw = payload.error || ""
         } catch (e) {
-          error = "Couldn't parse the daemon's response"
+          errorCode = "parse_error"
         }
       }
       if (!ok) {
         root.opened = true
-        root.loadError = error
+        root.loadError = resolveDaemonError(errorCode, errorApp, errorRaw)
         rebuildModel()
         Qt.callLater(function () { keyCatcher.forceActiveFocus() })
       } else if (!shown) {
@@ -164,7 +187,9 @@ Item {
         // this app has no shortcuts overlay of its own. Reopen and say so
         // plainly instead of just leaving the user looking at their desktop.
         root.opened = true
-        root.loadError = "No shortcuts to display — " + error
+        root.loadError = I18n.tr("no_shortcuts_to_display", {
+          reason: resolveDaemonError(errorCode, errorApp, errorRaw)
+        })
         rebuildModel()
         Qt.callLater(function () { keyCatcher.forceActiveFocus() })
       }
@@ -279,7 +304,7 @@ Item {
         Text {
           visible: root.loading
           width: parent.width
-          text: "Reading shortcuts…"
+          text: I18n.tr("reading_shortcuts")
           color: root.foreground
           opacity: 0.6
           font.family: root.fontFamily
@@ -295,7 +320,7 @@ Item {
             wrapMode: Text.WordWrap
             text: root.loadError.length > 0
               ? root.loadError
-              : "No shortcuts found — " + root.appName + " doesn't expose its menu to the accessibility tree."
+              : I18n.tr("no_shortcuts_found", { app: root.appName })
             color: root.foreground
             opacity: 0.6
             font.family: root.fontFamily
@@ -311,7 +336,7 @@ Item {
             visible: !root.nativeAttempted
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "Try " + (root.appName || "this app") + "'s own shortcuts overlay"
+            text: I18n.tr("try_native_overlay", { app: root.appName || I18n.tr("this_app") })
             color: root.foreground
             opacity: nativeHint.containsMouse ? 1.0 : 0.75
             font.family: root.fontFamily

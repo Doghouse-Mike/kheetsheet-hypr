@@ -43,7 +43,7 @@ echo "==> Installing plugin..."
 # introspection command, but its Loader never activates. A real copy works.
 rm -rf "$PLUGIN_DEST"
 mkdir -p "$PLUGIN_DEST"
-cp "$PROJECT_DIR/manifest.json" "$PROJECT_DIR/Kheetsheet.qml" "$PLUGIN_DEST/"
+cp "$PROJECT_DIR/manifest.json" "$PROJECT_DIR/Kheetsheet.qml" "$PROJECT_DIR/i18n.js" "$PLUGIN_DEST/"
 
 echo "==> Enabling plugin in shell.json..."
 python3 - "$SHELL_JSON" "$PLUGIN_ID" <<'PYEOF'

@@ -71,19 +71,30 @@ class KheetSheetService(dbus.service.Object):
         # itself before this is called (see Kheetsheet.qml's
         # tryNativeOverlay()), so the synthetic keypress reaches the target
         # app instead of being swallowed here.
+        # `error` stays plain English throughout - it's a debugging aid
+        # (visible in journalctl) and a last-resort fallback for a QML build
+        # too old to recognize `error_code`. `error_code` is the stable,
+        # locale-independent value the QML side actually displays (see
+        # Kheetsheet.qml's resolveDaemonError() / i18n.js) - never add a
+        # translated string here, that would defeat the point.
         pid, app_id = self._last_pid, self._last_app_id
         if pid is None:
-            return json.dumps({"app": None, "ok": False, "error": "no active window known"})
+            return json.dumps({
+                "app": None, "ok": False,
+                "error": "no active window known", "error_code": "no_active_window",
+            })
         if not synthetic_input_available():
             return json.dumps({
                 "app": app_id, "ok": False,
                 "error": "ydotool isn't installed - can't send the native shortcut combo",
+                "error_code": "ydotool_missing",
             })
 
         if not focus_window(pid):
             return json.dumps({
                 "app": app_id, "ok": False,
                 "error": "couldn't refocus the original window (it may have closed)",
+                "error_code": "refocus_failed",
             })
 
         before = window_snapshot()
@@ -97,6 +108,7 @@ class KheetSheetService(dbus.service.Object):
             return json.dumps({
                 "app": app_id, "ok": True, "shown": False,
                 "error": f"{app_id} doesn't seem to have its own shortcuts overlay",
+                "error_code": "no_native_overlay",
             })
         return json.dumps({"app": app_id, "ok": True, "shown": True})
 

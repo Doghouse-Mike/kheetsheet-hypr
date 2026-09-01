@@ -14,8 +14,9 @@ What's not done yet:
 5. **No git commits yet** — repo has real content but is uncommitted, waiting for you to look it over first.
 6. Only tested the native-overlay fallback against one app (Nautilus). Should hold for other libadwaita apps with the same dialog convention, but that's inference, not verification - see session 5's "not yet done."
 7. ~~Clicking "Try an app's own overlay" always reported success, even for apps with no such dialog (e.g. Vivaldi), leaving the panel to just vanish with no feedback.~~ **Done and verified live** — see session 9 below.
+8. ~~No localization.~~ **Done** — see session 10 below. LLM-written translations, not yet reviewed by a native speaker for any of the 8 added languages.
 
-Full repo layout: `daemon/kheetsheet_hyprd/` (service.py, hypr.py, native_overlay.py, __main__.py), `manifest.json` + `Kheetsheet.qml` (repo root - moved out of `plugin/doghouse-mike.kheetsheet/` in session 6, see below), `systemd/kheetsheet-hypr-daemon.service`, `install.sh`, `README.md`, `LICENSE`, `screenshots/`.
+Full repo layout: `daemon/kheetsheet_hyprd/` (service.py, hypr.py, native_overlay.py, __main__.py), `manifest.json` + `Kheetsheet.qml` + `i18n.js` (repo root - moved out of `plugin/doghouse-mike.kheetsheet/` in session 6, see below; `i18n.js` added session 10), `systemd/kheetsheet-hypr-daemon.service`, `install.sh`, `README.md`, `LICENSE`, `screenshots/`.
 
 ## Session 9: added the "app has no shortcuts overlay of its own" error message, verified live
 
@@ -31,6 +32,27 @@ Picked up from a prior window that hit unrelated environmental trouble mid-sessi
 **Verified live, end-to-end, this session:** launched a fresh Vivaldi window (no native shortcuts dialog), focused it via `focus_window()`, toggled the kheetsheet panel via `omarchy-shell shell toggle`, pressed Enter to fire `tryNativeOverlay()`, screenshotted. Panel correctly re-showed with **"No shortcuts to display — vivaldi-stable doesn't seem to have its own shortcuts overlay."** Test app and panel both closed afterward. This was the one thing the prior session's handoff had flagged as not independently confirmed — now confirmed.
 
 **Not done / still open:** no git commits yet (same as every prior session — waiting on final review). Nothing else outstanding on this specific task.
+
+## Session 10: added localization (i18n)
+
+Not part of the original scope - confirmed by re-reading this doc's spike/scoping sections (1-3) that localization was never planned, not a dropped task. Added on explicit request.
+
+**Approach:** no Qt Linguist (`.ts`/`.qm`) - `lrelease` isn't installed on this machine, and Quickshell plugins don't get to install a `QTranslator` into the shell's shared QML engine. Instead, a plain string table:
+
+- `i18n.js` (new, repo root): a `.pragma library` JS module with one object per language (`en`/`fr`/`de`/`es`/`it`/`pt_BR`/`ja`/`zh_Hans`/`ru`), a `resolveLocale()` that maps `Qt.locale().name` down to one of those keys (falling back to `en` for anything unsupported, e.g. `zh_TW`, `nl_NL`), and `tr(key, params)` doing simple `{placeholder}` substitution. An unrecognized key returns itself rather than throwing, so a typo is obvious in testing instead of crashing the panel.
+- `Kheetsheet.qml`: every hardcoded UI string now goes through `I18n.tr(...)`. Added `resolveDaemonError(code, app, raw)` to turn the daemon's `error_code` into localized text, with `raw` (the daemon's English `error` string) as a last-resort fallback for an unrecognized code.
+- `daemon/kheetsheet_hyprd/__main__.py`: `TryNativeOverlay()` now returns a stable `error_code` (`no_active_window`, `ydotool_missing`, `refocus_failed`, `no_native_overlay`) alongside the existing English `error` string, which stays as a debugging aid (journalctl) and back-compat fallback, not what's shown to the user anymore.
+- `install.sh`: now also copies `i18n.js` to the deployed plugin directory (same "shell reads the installed copy, not the repo" gotcha as `Kheetsheet.qml` - see session 9).
+
+**Out of scope, deliberately:** the shortcut labels/groups themselves (e.g. "File", "Ctrl+O") come straight from the target app's own AT-SPI tree - that's the app's own strings, already its own (or not) localization, not this project's to translate.
+
+**Known limitations** (documented in `i18n.js` itself too): a couple of templates bake in a language-specific grammatical assumption that a flat string table can't express generally - French "de" doesn't elide to "d'" before a vowel-starting app name, Portuguese "de este" should contract to "deste", German's "this app" fallback is pre-declined (dative) for the one preposition it's used with. All cosmetic, all in the empty-`appName` fallback path specifically, none affect the common case where a real app name is known.
+
+**Verified:** wrote a standalone test harness (`qml6 --apptype core`, unrelated to and never touching the live shell) exercising `resolveLocale()` and `tr()` against forced `LANG`/`LC_ALL` for every target locale plus two unsupported ones (`zh_TW`, `nl_NL`) to confirm the fallback path - all correct (output goes to journald, not stdout, for anyone repeating this: `qml6`'s `console.log` doesn't print to the terminal on this machine). Then deployed for real (`omarchy-restart-shell`, daemon restart) and re-ran the same live Vivaldi "no native overlay" test as session 9, in English (the default/safe locale) - confirmed the templated pipeline renders identically to before. Did not force a non-English locale on the live shell itself (would mean restarting the whole desktop shell in another language just to check one plugin - disproportionate for what the isolated harness already confirmed).
+
+**Translation quality:** LLM-written, not native-speaker-reviewed. Fluent and grammatically sound as far as I can verify, but flagged to Mike as worth a native speaker's pass before treating as final, same caveat as any machine translation.
+
+**Incident this session (self-caused, disclosed to Mike immediately):** while cleaning up a blank test Vivaldi window, a `kill` landed after a delay and took down the *entire* Vivaldi process rather than just that window - it turned out to share a pid with Mike's own, real, already-open Vivaldi window (browsing this project's marketplace-submission GitHub issue). Not caught by the pre-kill check (checked immediately after issuing the kill and it looked like a no-op, but it fired moments later). No data lost beyond an open tab; Vivaldi's session restore should recover it. Lesson for next time: don't `kill` a pid shared with a window you didn't open yourself without confirming the *whole* process is disposable, not just checking once right after.
 
 ## Related projects found (2026-09-01) — not yet acted on, revisit later
 
