@@ -34,6 +34,9 @@ var strings = {
     ydotool_missing: "ydotool isn't installed — can't send the native shortcut combo",
     refocus_failed: "Couldn't refocus the original window (it may have closed)",
     no_native_overlay: "{app} doesn't seem to have its own shortcuts overlay",
+    invalid_session: "This request is no longer valid — reopen the panel and try again.",
+    send_failed: "Couldn't send the synthetic key combo — is ydotoold running?",
+    builtin_keymap_suffix: " · built-in keymap",
   },
   fr: {
     daemon_unreachable: "Impossible de joindre le démon kheetsheet — kheetsheet-hyprd est-il en cours d'exécution ?",
@@ -47,6 +50,9 @@ var strings = {
     ydotool_missing: "ydotool n'est pas installé — impossible d'envoyer la combinaison de raccourci native",
     refocus_failed: "Impossible de refocaliser la fenêtre d'origine (elle a peut-être été fermée)",
     no_native_overlay: "{app} ne semble pas avoir son propre écran de raccourcis",
+    invalid_session: "Cette requête n'est plus valide — rouvrez le panneau et réessayez.",
+    send_failed: "Impossible d'envoyer la combinaison de touches — ydotoold est-il en cours d'exécution ?",
+    builtin_keymap_suffix: " · raccourcis intégrés",
   },
   de: {
     daemon_unreachable: "Der kheetsheet-Dienst ist nicht erreichbar — läuft kheetsheet-hyprd?",
@@ -60,6 +66,9 @@ var strings = {
     ydotool_missing: "ydotool ist nicht installiert — die native Tastenkombination kann nicht gesendet werden",
     refocus_failed: "Das ursprüngliche Fenster konnte nicht wieder fokussiert werden (es wurde möglicherweise geschlossen)",
     no_native_overlay: "{app} scheint keine eigene Tastenkombinationen-Übersicht zu haben",
+    invalid_session: "Diese Anfrage ist nicht mehr gültig — Panel erneut öffnen und noch einmal versuchen.",
+    send_failed: "Die Tastenkombination konnte nicht gesendet werden — läuft ydotoold?",
+    builtin_keymap_suffix: " · integrierte Tastenkombinationen",
   },
   es: {
     daemon_unreachable: "No se pudo contactar con el demonio de kheetsheet — ¿está en ejecución kheetsheet-hyprd?",
@@ -73,6 +82,9 @@ var strings = {
     ydotool_missing: "ydotool no está instalado — no se puede enviar la combinación de teclas nativa",
     refocus_failed: "No se pudo volver a enfocar la ventana original (puede que se haya cerrado)",
     no_native_overlay: "{app} no parece tener su propia ventana de atajos",
+    invalid_session: "Esta solicitud ya no es válida — vuelve a abrir el panel e inténtalo de nuevo.",
+    send_failed: "No se pudo enviar la combinación de teclas — ¿está en ejecución ydotoold?",
+    builtin_keymap_suffix: " · atajos integrados",
   },
   it: {
     daemon_unreachable: "Impossibile raggiungere il demone di kheetsheet — kheetsheet-hyprd è in esecuzione?",
@@ -86,6 +98,9 @@ var strings = {
     ydotool_missing: "ydotool non è installato — impossibile inviare la combinazione di tasti nativa",
     refocus_failed: "Impossibile rimettere a fuoco la finestra originale (potrebbe essere stata chiusa)",
     no_native_overlay: "{app} non sembra avere una propria finestra delle scorciatoie",
+    invalid_session: "Questa richiesta non è più valida — riapri il pannello e riprova.",
+    send_failed: "Impossibile inviare la combinazione di tasti — ydotoold è in esecuzione?",
+    builtin_keymap_suffix: " · scorciatoie integrate",
   },
   pt_BR: {
     daemon_unreachable: "Não foi possível acessar o daemon do kheetsheet — o kheetsheet-hyprd está em execução?",
@@ -99,6 +114,9 @@ var strings = {
     ydotool_missing: "o ydotool não está instalado — não é possível enviar a combinação de teclas nativa",
     refocus_failed: "Não foi possível focar novamente a janela original (ela pode ter sido fechada)",
     no_native_overlay: "o {app} não parece ter uma janela de atalhos própria",
+    invalid_session: "Esta solicitação não é mais válida — reabra o painel e tente novamente.",
+    send_failed: "Não foi possível enviar a combinação de teclas — o ydotoold está em execução?",
+    builtin_keymap_suffix: " · atalhos integrados",
   },
   ja: {
     daemon_unreachable: "kheetsheet デーモンに接続できません — kheetsheet-hyprd は実行されていますか?",
@@ -112,6 +130,9 @@ var strings = {
     ydotool_missing: "ydotool がインストールされていません — ネイティブのショートカットキーを送信できません",
     refocus_failed: "元のウィンドウにフォーカスを戻せませんでした(閉じられた可能性があります)",
     no_native_overlay: "{app} には独自のショートカット一覧がないようです",
+    invalid_session: "このリクエストは無効になりました — パネルを開き直してもう一度お試しください。",
+    send_failed: "キーの組み合わせを送信できませんでした — ydotoold は実行されていますか?",
+    builtin_keymap_suffix: " · 組み込みショートカット",
   },
   zh_Hans: {
     daemon_unreachable: "无法连接到 kheetsheet 守护进程 — kheetsheet-hyprd 是否正在运行?",
@@ -125,6 +146,9 @@ var strings = {
     ydotool_missing: "未安装 ydotool — 无法发送原生快捷键组合",
     refocus_failed: "无法重新聚焦原始窗口(它可能已关闭)",
     no_native_overlay: "{app} 似乎没有自带的快捷键面板",
+    invalid_session: "此请求已失效 — 请重新打开面板并重试。",
+    send_failed: "无法发送按键组合 — ydotoold 是否正在运行?",
+    builtin_keymap_suffix: " · 内置快捷键",
   },
   ru: {
     daemon_unreachable: "Не удалось подключиться к службе kheetsheet — запущен ли kheetsheet-hyprd?",
@@ -138,6 +162,9 @@ var strings = {
     ydotool_missing: "ydotool не установлен — не удаётся отправить встроенное сочетание клавиш",
     refocus_failed: "Не удалось вернуть фокус исходному окну (возможно, оно было закрыто)",
     no_native_overlay: "у {app}, похоже, нет собственных сочетаний клавиш",
+    invalid_session: "Этот запрос больше недействителен — откройте панель заново и повторите попытку.",
+    send_failed: "Не удалось отправить сочетание клавиш — запущен ли ydotoold?",
+    builtin_keymap_suffix: " · встроенные сочетания клавиш",
   },
 }
 

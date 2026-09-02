@@ -20,13 +20,15 @@ cd kheetsheet-hypr
 
 This installs the daemon as a systemd user service, copies the plugin into `~/.config/omarchy/plugins/`, and enables it in `~/.config/omarchy/shell.json`. It does **not** bind a hotkey - see the printed instructions at the end (no single default key is safe across every Omarchy install; two different "obvious" defaults were both already taken on the machine this was developed on).
 
+`install.sh` copies the daemon to a durable location (`~/.local/share/kheetsheet-hypr/daemon`) rather than running it out of wherever you happened to clone or download this repo - once it finishes, this checkout/extracted folder can be deleted safely. It'll also ask for explicit consent before enabling system accessibility (AT-SPI) - see [Privacy](#privacy) below for what that means and how to undo it.
+
 **Installing via the Omarchy plugin marketplace instead?**
 
 ```
 omarchy plugin add https://github.com/Doghouse-Mike/kheetsheet-hypr
 ```
 
-This only clones this repo into `~/.config/omarchy/plugins/doghouse-mike.kheetsheet/` and enables the manifest - it does **not** run `install.sh`, so the backend daemon this plugin depends on won't be running yet and the overlay will always show "no shortcuts found." Run `install.sh` from inside that cloned directory (or from a separate clone of this repo) once, manually, to finish setup.
+This only clones this repo into `~/.config/omarchy/plugins/doghouse-mike.kheetsheet/` and enables the manifest - it does **not** run `install.sh`, so the backend daemon this plugin depends on won't be running yet and the overlay will always show "no shortcuts found." Run `./install.sh` from inside that cloned directory once, manually, to finish setup - it's safe to run it from there directly (it stages everything before touching that directory, and copies the daemon out to its own durable location first).
 
 Test without a hotkey at all:
 
@@ -60,13 +62,12 @@ The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is por
 ## Removal
 
 ```
-systemctl --user disable --now kheetsheet-hypr-daemon.service
-rm -f ~/.config/systemd/user/kheetsheet-hypr-daemon.service
-systemctl --user daemon-reload
-omarchy plugin remove doghouse-mike.kheetsheet
+./install.sh --uninstall
 ```
 
-Then remove the `o.bind(...)` line you added for it from `~/.config/hypr/bindings.lua` and run `hyprctl reload`. Nothing else is touched: no other config files, no data written to disk, no lingering processes once the service is stopped.
+Stops and removes the systemd service, removes the installed plugin and daemon copies, removes the `shell.json` entry, and (if kheetsheet was the one that turned it on - see [Privacy](#privacy)) offers to disable system accessibility again. Safe to run more than once. Then remove the `o.bind(...)` line you added for it from `~/.config/hypr/bindings.lua` and run `hyprctl reload` - that part's still manual, since this project doesn't touch your keybindings file on its own.
+
+(`--uninstall` needs this repo's `install.sh` present somewhere on disk - it's not itself installed anywhere. If you've already deleted your clone, the equivalent manual steps are: `systemctl --user disable --now kheetsheet-hypr-daemon.service`, remove `~/.config/systemd/user/kheetsheet-hypr-daemon.service`, `systemctl --user daemon-reload`, `omarchy plugin remove doghouse-mike.kheetsheet`, remove `~/.local/share/kheetsheet-hypr/`, and remove `~/.config/kheetsheet-hypr/`.)
 
 ## Usage
 
@@ -79,6 +80,7 @@ Largely identical to upstream - this is mostly a property of each app's toolkit 
 - **Works well, via the normal AT-SPI menu path:** Qt/KDE Frameworks apps with a real menu bar (Okular, qBittorrent - both verified with real, complete shortcut lists including nested submenus). Also expected to work: Dolphin, Kate, Konsole, KCalc, Krita, LibreOffice, older GTK apps with a traditional menu bar (GIMP 2.x).
 - **Works via the opt-in native-overlay fallback:** GNOME/libadwaita header-bar-only apps with their own `Ctrl+Shift+/` shortcuts dialog (Nautilus - verified). See "Native-overlay fallback" below - this only ever runs when the user explicitly asks for it from the empty state, never automatically.
 - **Won't work at all:** Electron apps (Obsidian - verified: registers with AT-SPI but exposes nothing walkable even with Chromium's `--force-renderer-accessibility` flag forced on, tested live; same toolkit-level gap as upstream's finding for VS Code/Discord/Slack/Teams/Spotify). No fallback exists for these - see HANDOVER.md for what was tried.
+- **Terminals, narrowly:** AT-SPI has nothing to say about what's actually running inside a terminal emulator. If the focused window is a known terminal and the normal AT-SPI path finds nothing, kheetsheet checks whether `nvim` or `tmux` is running as a child process of that terminal (real `/proc` process-tree walk, never reads terminal content/scrollback) and shows a small built-in keymap for whichever it finds, labeled "· built-in keymap" so it's clearly not the app's own real data. Deliberately narrow - not a general per-app catalog.
 
 Building an app and want it to show up here? See [COMPATIBILITY.md](COMPATIBILITY.md) for what kheetsheet actually looks for and how to add it, toolkit by toolkit.
 
@@ -98,7 +100,8 @@ This is the one piece of the whole project that injects real input rather than o
 - `daemon/kheetsheet_hyprd/service.py` - AT-SPI tree walk, GTK/Qt accelerator normalization, Flatpak pid-matching fallback. Ported from upstream, includes one fix found during porting: some apps (confirmed: Okular) register *two* AT-SPI application objects under the same pid, one real and one an empty stub, and which one gets enumerated first isn't controllable - the matcher now prefers whichever has children instead of returning on the first pid hit.
 - `daemon/kheetsheet_hyprd/hypr.py` - synchronous `hyprctl -j activewindow` query.
 - `daemon/kheetsheet_hyprd/native_overlay.py` - the opt-in fallback: Hyprland-Lua-API window focusing (`hl.dsp.window.cycle_next()` in a loop - there's no selector-based focus dispatcher in this Hyprland version's Lua API, reverse-engineered live, see HANDOVER.md) and the `ydotool`-based synthetic key send that triggers the app's own dialog. Nothing here reads or renders that dialog's contents.
-- `daemon/kheetsheet_hyprd/__main__.py` - the D-Bus service (`com.kheetsheet.Daemon` at `/KheetSheet`, same bus name as upstream). `GetShortcuts`/`InvokeShortcut` mirror upstream's pull model; `TryNativeOverlay` is new, for the fallback above.
+- `daemon/kheetsheet_hyprd/terminal_shortcuts.py` - the narrow terminal `/proc`-walk fallback (nvim/tmux only) described under "App compatibility" above.
+- `daemon/kheetsheet_hyprd/__main__.py` - the D-Bus service (`com.kheetsheet.Daemon` at `/KheetSheet`, same bus name as upstream). `GetShortcuts`/`InvokeShortcut` mirror upstream's pull model; `TryNativeOverlay` is new, for the native-overlay fallback above. Both `InvokeShortcut` and `TryNativeOverlay` require a short-lived, single-use token that `GetShortcuts` hands out - a caller can't invoke either cold.
 - `manifest.json` / `Kheetsheet.qml` (repo root) - the Omarchy Quickshell overlay plugin. Talks to the daemon via `busctl --json=short` (Quickshell has no generic D-Bus client QML type - only a special-purpose `DBusMenu` module), the same "shell out, parse JSON" idiom the `sinkeat.keysmith` plugin uses for its own helpers. Kept at the repo root (rather than nested under a plugin-id folder) so this repo satisfies the Omarchy plugin marketplace's "manifest.json at repository root" convention.
 - `systemd/kheetsheet-hypr-daemon.service` - the installed user unit (template; `install.sh` fills in the real path).
 
@@ -107,6 +110,10 @@ This is the one piece of the whole project that injects real input rather than o
 Same as upstream for the normal path: no network calls, nothing written to disk, nothing retained once the overlay closes. See upstream's README for the full reasoning - it all still applies here unchanged.
 
 The opt-in native-overlay fallback is the one deliberate exception, and it's still narrow: it sends one real keypress to the app that was already focused (nothing else) and leaves it to show its own dialog - kheetsheet never reads or retains anything from it. No network calls or disk writes happen there either. It only ever runs when explicitly triggered - see "Native-overlay fallback" above for the full reasoning on why this exists as opt-in rather than automatic.
+
+**Accessibility (AT-SPI) is enabled system-wide, with your consent, at install time.** The daemon's whole mechanism depends on `org.a11y.Status.IsEnabled` being on - once it is, any AT-SPI-aware app or tool on your session can read other apps' accessibility trees, not just kheetsheet. `install.sh` explains this and asks before doing anything; declining aborts the install with nothing changed. It stays enabled until you log out, reboot, or explicitly turn it off - `./install.sh --uninstall` offers to, if kheetsheet was the one that turned it on in the first place (if it was already on for some other reason, uninstalling leaves it alone and says so).
+
+The terminal `/proc`-walk fallback (see "App compatibility") only ever reads process names (`nvim`/`tmux`, via `/proc/<pid>/stat`) to decide whether to show a hardcoded keymap - it never reads terminal content, scrollback, or any other process's data.
 
 ## Read more
 "Landing page" of a sort is [here](https://28mm.coffee/kheetsheet), and there's a bit on the [reasoning](https://28mm.coffee/the-reasoning-behind-kheetsheet). 

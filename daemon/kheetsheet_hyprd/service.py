@@ -1,4 +1,7 @@
+import json
+import os
 import re
+import secrets
 
 import dbus
 import gi
@@ -16,6 +19,20 @@ from gi.repository import Atspi
 A11Y_STATUS_BUS = "org.a11y.Bus"
 A11Y_STATUS_PATH = "/org/a11y/bus"
 A11Y_STATUS_IFACE = "org.a11y.Status"
+
+CONFIG_PATH = os.path.expanduser("~/.config/kheetsheet-hypr/config.json")
+CONFIG_MAX_BYTES = 1_000_000
+
+# Bounds on what a single collect_shortcuts() call will walk/keep - AT-SPI
+# tree shape and strings come from whatever app happens to be focused, not
+# from anything this project controls, so none of these are trusted to stay
+# small on their own.
+MAX_DESKTOP_CHILDREN = 500
+MAX_CHILDREN_PER_NODE = 500
+MAX_SHORTCUTS = 1000
+MAX_STRING_LEN = 300
+
+SESSION_TOKEN_TTL = 20.0
 
 MENU_ROLES = {"menu", "menu item", "check menu item", "radio menu item"}
 MENU_BAR_ROLE = "menu bar"
@@ -57,12 +74,50 @@ def _normalize_key_binding(raw):
     return "+".join(labels)
 
 
+def _read_config():
+    try:
+        if os.path.islink(CONFIG_PATH) or not os.path.isfile(CONFIG_PATH):
+            return {}
+        with open(CONFIG_PATH) as f:
+            data = f.read(CONFIG_MAX_BYTES + 1)
+        if len(data) > CONFIG_MAX_BYTES:
+            return {}
+        return json.loads(data)
+    except Exception:
+        return {}
+
+
+def accessibility_consent_granted():
+    return bool(_read_config().get("a11y_consent"))
+
+
 def ensure_accessibility_enabled():
+    # install.sh is where consent is actually requested (writes CONFIG_PATH) -
+    # this only ever flips the real, system-wide a11y switch on if that
+    # consent was already given. A missing/absent config means "not asked
+    # yet", not "enable anyway".
+    if not accessibility_consent_granted():
+        return False
     bus = dbus.SessionBus()
     obj = bus.get_object(A11Y_STATUS_BUS, A11Y_STATUS_PATH)
     props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
     if not bool(props.Get(A11Y_STATUS_IFACE, "IsEnabled")):
         props.Set(A11Y_STATUS_IFACE, "IsEnabled", True)
+    return True
+
+
+def make_session_token():
+    return secrets.token_hex(16)
+
+
+def token_still_valid(session, token, now, ttl=SESSION_TOKEN_TTL):
+    if not session or not token:
+        return False
+    if session.get("token") != token:
+        return False
+    if now - session.get("created", 0) > ttl:
+        return False
+    return True
 
 
 def find_app_node_by_pid(pid, app_id=None):
@@ -86,7 +141,11 @@ def find_app_node_by_pid(pid, app_id=None):
     normalized_app_id = app_id.strip().lower() if app_id else None
     pid_match = None
     fallback = None
-    for i in range(desktop.get_child_count()):
+    try:
+        desktop_count = min(desktop.get_child_count(), MAX_DESKTOP_CHILDREN)
+    except Exception:
+        desktop_count = 0
+    for i in range(desktop_count):
         app = desktop.get_child_at_index(i)
         try:
             if app.get_process_id() == pid:
@@ -110,6 +169,55 @@ def find_app_node_by_pid(pid, app_id=None):
     return pid_match or fallback
 
 
+DIALOG_ROLE = "dialog"
+MAX_DIALOG_SCAN_NODES = 2000
+
+
+def _has_dialog_node(acc, depth, budget):
+    if depth > 15 or budget[0] <= 0:
+        return False
+    budget[0] -= 1
+    try:
+        role = acc.get_role_name()
+    except Exception:
+        return False
+    if role == DIALOG_ROLE:
+        return True
+    try:
+        child_count = min(acc.get_child_count(), MAX_CHILDREN_PER_NODE)
+    except Exception:
+        return False
+    for j in range(child_count):
+        if budget[0] <= 0:
+            return False
+        try:
+            child = acc.get_child_at_index(j)
+        except Exception:
+            continue
+        if _has_dialog_node(child, depth + 1, budget):
+            return True
+    return False
+
+
+def has_dialog_descendant(pid, app_id=None):
+    """Content-blind presence check: does this app's AT-SPI tree currently
+    contain any dialog-role node? Never reads names/labels, only role -
+    used to detect a native shortcuts-overlay dialog for apps (confirmed:
+    Nautilus on GNOME 50+) that present it as an in-window AdwDialog rather
+    than a separate toplevel window, where a hyprctl-clients window diff
+    can never see it. Bounded the same way as collect_shortcuts (depth,
+    per-node child count, total nodes visited) since the tree shape isn't
+    trusted to stay small.
+    """
+    try:
+        app_node = find_app_node_by_pid(pid, app_id=app_id)
+        if app_node is None:
+            return False
+        return _has_dialog_node(app_node, 0, [MAX_DIALOG_SCAN_NODES])
+    except Exception:
+        return False
+
+
 def collect_shortcuts(app_node, max_depth=15):
     # KDE/Qt menu bars expose top-level entries (File, Edit, ...) as direct
     # children of the window, with the same "menu item" role as their
@@ -117,7 +225,7 @@ def collect_shortcuts(app_node, max_depth=15):
     shortcuts = []
 
     def walk(acc, group, depth):
-        if depth > max_depth:
+        if depth > max_depth or len(shortcuts) >= MAX_SHORTCUTS:
             return
         try:
             role = acc.get_role_name()
@@ -131,13 +239,20 @@ def collect_shortcuts(app_node, max_depth=15):
             except Exception:
                 key_binding = None
             if key_binding:
-                shortcuts.append((group, name, key_binding, acc))
+                shortcuts.append((
+                    group[:MAX_STRING_LEN],
+                    name[:MAX_STRING_LEN],
+                    key_binding[:MAX_STRING_LEN],
+                    acc,
+                ))
 
         try:
-            child_count = acc.get_child_count()
+            child_count = min(acc.get_child_count(), MAX_CHILDREN_PER_NODE)
         except Exception:
             return
         for j in range(child_count):
+            if len(shortcuts) >= MAX_SHORTCUTS:
+                return
             try:
                 child = acc.get_child_at_index(j)
             except Exception:
@@ -149,7 +264,7 @@ def collect_shortcuts(app_node, max_depth=15):
             return
         try:
             role = acc.get_role_name()
-            child_count = acc.get_child_count()
+            child_count = min(acc.get_child_count(), MAX_CHILDREN_PER_NODE)
         except Exception:
             return
         if role == MENU_BAR_ROLE:
@@ -163,15 +278,17 @@ def collect_shortcuts(app_node, max_depth=15):
                 if top_role not in MENU_ROLES or not top_name:
                     continue
                 try:
-                    sub_count = top_menu.get_child_count()
+                    sub_count = min(top_menu.get_child_count(), MAX_CHILDREN_PER_NODE)
                 except Exception:
                     continue
                 for k in range(sub_count):
+                    if len(shortcuts) >= MAX_SHORTCUTS:
+                        return
                     try:
                         sub_child = top_menu.get_child_at_index(k)
                     except Exception:
                         continue
-                    walk(sub_child, top_name, 0)
+                    walk(sub_child, top_name[:MAX_STRING_LEN], 0)
             return
         for j in range(child_count):
             try:

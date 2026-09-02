@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import time
 
+from .hypr import run_hyprctl_bounded
+
 
 def _hypr_socket_path():
     sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
@@ -36,10 +38,10 @@ def _hypr_command(command):
 
 
 def _active_window():
+    out = run_hyprctl_bounded(["-j", "activewindow"])
+    if out is None:
+        return None, None
     try:
-        out = subprocess.run(
-            ["hyprctl", "-j", "activewindow"], capture_output=True, text=True, timeout=2
-        ).stdout
         data = json.loads(out)
         return data.get("pid"), data.get("class")
     except Exception:
@@ -90,27 +92,21 @@ def window_snapshot():
     AT-SPI content for its own panel, but the opt-in native-overlay path is
     meant to trigger the target app's own dialog and leave it alone,
     unscraped.
+
+    Only half the detection story as of session 11's live testing: some
+    apps (confirmed: Nautilus on GNOME 50+) present the dialog as an
+    in-window AdwDialog rather than a new toplevel, which this can never
+    see - __main__.py's TryNativeOverlay also checks
+    service.has_dialog_descendant() (an equally content-blind AT-SPI
+    presence check) alongside this.
     """
+    out = run_hyprctl_bounded(["-j", "clients"], max_bytes=2_000_000)
+    if out is None:
+        return set()
     try:
-        out = subprocess.run(
-            ["hyprctl", "-j", "clients"], capture_output=True, text=True,
-            timeout=2, check=True,
-        ).stdout
         return {w["address"] for w in json.loads(out) if "address" in w}
     except Exception:
         return set()
-
-
-def new_window_appeared(before, settle=0.4):
-    """True if a window not in `before` exists after a short settle delay.
-
-    GTK4/libadwaita's Ctrl+Shift+/ shortcuts dialog is a real toplevel
-    window, so a new address showing up is a cheap way to tell "the app
-    opened something" apart from "nothing happened" (e.g. the app has no
-    such binding) - without caring what that something is.
-    """
-    time.sleep(settle)
-    return len(window_snapshot() - before) > 0
 
 
 def _ydotool_key(sequence):

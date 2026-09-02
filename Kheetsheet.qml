@@ -31,6 +31,23 @@ Item {
   // open() session, successful or not, so the offer isn't repeated after
   // a failure within the same sitting.
   property bool nativeAttempted: false
+  // Single-use capability token minted by the daemon's GetShortcuts() and
+  // required by InvokeShortcut/TryNativeOverlay - see __main__.py's
+  // _consume_token(). Cleared on every open()/fetch failure so a stale
+  // token can never be reused across sessions.
+  property string sessionToken: ""
+  // True when the current item list came from the terminal builtin-keymap
+  // fallback (see terminal_shortcuts.py), not the app's own real
+  // accessibility data - surfaced so the header can say so honestly, same
+  // principle as the native-overlay path.
+  property bool builtinSource: false
+
+  // Bounds on what's accepted from the daemon before it's parsed/rendered -
+  // the daemon already bounds what it sends, but the QML side doesn't trust
+  // that alone (defense in depth against a stale/incompatible daemon build).
+  readonly property int maxResponseChars: 2000000
+  readonly property int maxItems: 2000
+  readonly property int maxStringLen: 200
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -68,6 +85,24 @@ Item {
     rebuildModel()
   }
 
+  // Validates/clamps whatever the daemon sent before it ever reaches the
+  // model: caps item count and truncates each field's length, and coerces
+  // non-string fields to strings rather than trusting the shape.
+  function clampItems(rawItems) {
+    if (!Array.isArray(rawItems)) return []
+    var out = []
+    var n = Math.min(rawItems.length, root.maxItems)
+    for (var i = 0; i < n; i++) {
+      var it = rawItems[i] || {}
+      out.push({
+        group: String(it.group || "").slice(0, root.maxStringLen),
+        label: String(it.label || "").slice(0, root.maxStringLen),
+        key: String(it.key || "").slice(0, root.maxStringLen)
+      })
+    }
+    return out
+  }
+
   // Maps one of the daemon's stable error_code values (see __main__.py) to
   // localized display text. `raw` is the daemon's own English `error`
   // string, used only as a last-resort fallback for a code this build
@@ -82,6 +117,8 @@ Item {
       case "no_native_overlay": return I18n.tr("no_native_overlay", { app: app })
       case "parse_error": return I18n.tr("parse_error")
       case "daemon_unreachable": return I18n.tr("daemon_unreachable")
+      case "invalid_session": return I18n.tr("invalid_session")
+      case "send_failed": return I18n.tr("send_failed")
       default: return raw || I18n.tr("daemon_unreachable")
     }
   }
@@ -95,25 +132,54 @@ Item {
     stderr: StdioCollector { id: fetchErr }
     onExited: function (exitCode) {
       root.loading = false
+      fetchTimeout.stop()
       if (exitCode !== 0) {
         root.loadError = I18n.tr("daemon_unreachable")
         root.appName = ""
         root.items = []
+        root.sessionToken = ""
+        root.builtinSource = false
         rebuildModel()
         return
       }
       try {
+        if (fetchOut.text.length > root.maxResponseChars)
+          throw new Error("response too large")
         var envelope = JSON.parse(fetchOut.text)
         var payload = JSON.parse(envelope.data[0])
-        root.appName = payload.app || ""
-        root.items = payload.items || []
+        root.appName = typeof payload.app === "string" ? payload.app : ""
+        root.items = clampItems(payload.items)
+        root.sessionToken = typeof payload.token === "string" ? payload.token : ""
+        root.builtinSource = payload.source === "builtin"
         root.loadError = root.appName === "" ? I18n.tr("no_active_window") : ""
       } catch (e) {
         root.loadError = I18n.tr("parse_error")
         root.appName = ""
         root.items = []
+        root.sessionToken = ""
+        root.builtinSource = false
       }
       rebuildModel()
+    }
+  }
+
+  // Kills a hung `busctl` call rather than letting it (and the panel's
+  // "loading" state) sit forever if the daemon is wedged or unreachable in
+  // a way that doesn't fail fast.
+  Timer {
+    id: fetchTimeout
+    interval: 3000
+    onTriggered: {
+      if (fetchProc.running) {
+        fetchProc.running = false
+        root.loading = false
+        root.loadError = I18n.tr("daemon_unreachable")
+        root.appName = ""
+        root.items = []
+        root.sessionToken = ""
+        root.builtinSource = false
+        rebuildModel()
+      }
     }
   }
 
@@ -121,14 +187,16 @@ Item {
     id: invokeProc
     command: ["busctl", "--user", "call",
               "com.kheetsheet.Daemon", "/KheetSheet",
-              "com.kheetsheet.Daemon", "InvokeShortcut", "i", "0"]
+              "com.kheetsheet.Daemon", "InvokeShortcut", "si", "", "0"]
   }
 
   function activate(itemIndex) {
     if (itemIndex < 0 || itemIndex >= root.items.length) return
+    if (!root.sessionToken) { root.dismiss(); return }
     invokeProc.command = ["busctl", "--user", "call",
                           "com.kheetsheet.Daemon", "/KheetSheet",
-                          "com.kheetsheet.Daemon", "InvokeShortcut", "i", String(itemIndex)]
+                          "com.kheetsheet.Daemon", "InvokeShortcut", "si",
+                          root.sessionToken, String(itemIndex)]
     invokeProc.running = true
     root.dismiss()
   }
@@ -155,10 +223,11 @@ Item {
     id: nativeProc
     command: ["busctl", "--user", "--json=short", "call",
               "com.kheetsheet.Daemon", "/KheetSheet",
-              "com.kheetsheet.Daemon", "TryNativeOverlay"]
+              "com.kheetsheet.Daemon", "TryNativeOverlay", "s", ""]
     stdout: StdioCollector { id: nativeOut }
     onExited: function (exitCode) {
       root.loading = false
+      nativeTimeout.stop()
       var ok = false
       var shown = true
       var errorCode = "daemon_unreachable"
@@ -166,13 +235,15 @@ Item {
       var errorRaw = ""
       if (exitCode === 0) {
         try {
+          if (nativeOut.text.length > root.maxResponseChars)
+            throw new Error("response too large")
           var envelope = JSON.parse(nativeOut.text)
           var payload = JSON.parse(envelope.data[0])
           ok = payload.ok === true
           shown = payload.shown !== false
-          errorCode = payload.error_code || ""
-          errorApp = payload.app || ""
-          errorRaw = payload.error || ""
+          errorCode = typeof payload.error_code === "string" ? payload.error_code : ""
+          errorApp = typeof payload.app === "string" ? payload.app : ""
+          errorRaw = typeof payload.error === "string" ? payload.error : ""
         } catch (e) {
           errorCode = "parse_error"
         }
@@ -196,8 +267,27 @@ Item {
     }
   }
 
+  // Kills a hung native-overlay attempt (daemon wedged mid focus-cycle, or
+  // busctl itself stuck) instead of leaving the panel hidden indefinitely
+  // with no way back in.
+  Timer {
+    id: nativeTimeout
+    interval: 6000
+    onTriggered: {
+      if (nativeProc.running) {
+        nativeProc.running = false
+        root.loading = false
+        root.opened = true
+        root.loadError = I18n.tr("daemon_unreachable")
+        rebuildModel()
+        Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+      }
+    }
+  }
+
   function tryNativeOverlay() {
     if (root.nativeAttempted) return
+    if (!root.sessionToken) return
     root.nativeAttempted = true
     root.loading = true
     root.loadError = ""
@@ -205,7 +295,11 @@ Item {
     // app can actually receive the synthetic keypress the daemon is about
     // to send it. Only reopened by nativeProc.onExited on failure.
     root.opened = false
+    nativeProc.command = ["busctl", "--user", "--json=short", "call",
+              "com.kheetsheet.Daemon", "/KheetSheet",
+              "com.kheetsheet.Daemon", "TryNativeOverlay", "s", root.sessionToken]
     nativeProc.running = true
+    nativeTimeout.restart()
   }
 
   function open(payloadJson) {
@@ -216,9 +310,12 @@ Item {
     root.loadError = ""
     root.loading = true
     root.nativeAttempted = false
+    root.sessionToken = ""
+    root.builtinSource = false
     listModel.clear()
     root.selectedIndex = -1
     fetchProc.running = true
+    fetchTimeout.restart()
     Qt.callLater(function () { keyCatcher.forceActiveFocus() })
   }
 
@@ -279,7 +376,9 @@ Item {
         Text {
           width: parent.width
           elide: Text.ElideRight
-          text: root.appName ? root.appName : (root.filterText.length ? root.filterText : "kheetsheet")
+          textFormat: Text.PlainText
+          text: (root.appName ? root.appName : (root.filterText.length ? root.filterText : "kheetsheet"))
+            + (root.builtinSource ? I18n.tr("builtin_keymap_suffix") : "")
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
@@ -288,6 +387,7 @@ Item {
         Text {
           width: parent.width
           visible: root.filterText.length > 0
+          textFormat: Text.PlainText
           text: root.filterText
           color: root.foreground
           opacity: 0.6
@@ -304,6 +404,7 @@ Item {
         Text {
           visible: root.loading
           width: parent.width
+          textFormat: Text.PlainText
           text: I18n.tr("reading_shortcuts")
           color: root.foreground
           opacity: 0.6
@@ -318,6 +419,7 @@ Item {
           Text {
             width: parent.width
             wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
             text: root.loadError.length > 0
               ? root.loadError
               : I18n.tr("no_shortcuts_found", { app: root.appName })
@@ -336,6 +438,7 @@ Item {
             visible: !root.nativeAttempted
             width: parent.width
             wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
             text: I18n.tr("try_native_overlay", { app: root.appName || I18n.tr("this_app") })
             color: root.foreground
             opacity: nativeHint.containsMouse ? 1.0 : 0.75
@@ -371,6 +474,7 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.space(4)
               anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
               text: section
               color: root.foreground
               opacity: 0.55
@@ -395,6 +499,7 @@ Item {
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               elide: Text.ElideRight
+              textFormat: Text.PlainText
               text: label
               color: index === root.selectedIndex ? root.selectedText : root.foreground
               font.family: root.fontFamily
@@ -405,6 +510,7 @@ Item {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(10)
               anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
               text: key
               color: index === root.selectedIndex ? root.selectedText : root.foreground
               opacity: 0.6
