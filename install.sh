@@ -225,16 +225,66 @@ EOF
 require_deps() {
     echo "==> Checking dependencies..."
     missing=()
-    python3 -c "import gi; gi.require_version('Atspi','2.0'); from gi.repository import Atspi" 2>/dev/null || missing+=("python-gobject + AT-SPI typelib (at-spi2-core)")
-    python3 -c "import dbus" 2>/dev/null || missing+=("python-dbus")
+    missing_pkgs=()
+    python3 -c "import gi; gi.require_version('Atspi','2.0'); from gi.repository import Atspi" 2>/dev/null || { missing+=("python-gobject + AT-SPI typelib (at-spi2-core)"); missing_pkgs+=("python-gobject" "at-spi2-core"); }
+    python3 -c "import dbus" 2>/dev/null || { missing+=("python-dbus"); missing_pkgs+=("python-dbus"); }
     command -v hyprctl >/dev/null 2>&1 || missing+=("hyprctl (part of Hyprland)")
     command -v busctl >/dev/null 2>&1 || missing+=("busctl (part of systemd)")
     command -v omarchy-shell >/dev/null 2>&1 || missing+=("omarchy-shell (part of Omarchy)")
 
     if [ ${#missing[@]} -ne 0 ]; then
-        echo "Missing dependencies, install these and re-run:"
+        echo "Missing dependencies:"
         printf '  - %s\n' "${missing[@]}"
-        exit 1
+
+        # Only offer to auto-install the plain pacman packages above -
+        # never hyprctl/busctl/omarchy-shell, since those being missing
+        # means this isn't actually an Omarchy/Hyprland session and
+        # pacman-installing "hyprland" or "omarchy" out from under
+        # whatever this environment actually is would be well outside
+        # what a plugin installer should be doing unprompted.
+        if [ ${#missing_pkgs[@]} -ne 0 ] && command -v pacman >/dev/null 2>&1; then
+            # dedupe (at-spi2-core can appear once, python-gobject/python-dbus each once)
+            local pkgs=()
+            local p seen
+            for p in "${missing_pkgs[@]}"; do
+                seen=false
+                for existing in "${pkgs[@]:-}"; do
+                    [ "$existing" = "$p" ] && seen=true && break
+                done
+                [ "$seen" = false ] && pkgs+=("$p")
+            done
+            echo
+            echo "The above can be installed with: sudo pacman -S --needed ${pkgs[*]}"
+            read -r -p "Install them now? [y/N] " reply
+            case "$reply" in
+                [yY]|[yY][eE][sS])
+                    sudo pacman -S --needed "${pkgs[@]}"
+                    ;;
+                *)
+                    echo "Skipped - install them yourself and re-run this script."
+                    exit 1
+                    ;;
+            esac
+
+            # Re-check rather than trusting pacman's exit code alone (e.g. a
+            # partial --needed no-op on an already-satisfied package name
+            # that doesn't actually provide the module we import).
+            missing=()
+            python3 -c "import gi; gi.require_version('Atspi','2.0'); from gi.repository import Atspi" 2>/dev/null || missing+=("python-gobject + AT-SPI typelib (at-spi2-core)")
+            python3 -c "import dbus" 2>/dev/null || missing+=("python-dbus")
+            command -v hyprctl >/dev/null 2>&1 || missing+=("hyprctl (part of Hyprland)")
+            command -v busctl >/dev/null 2>&1 || missing+=("busctl (part of systemd)")
+            command -v omarchy-shell >/dev/null 2>&1 || missing+=("omarchy-shell (part of Omarchy)")
+            if [ ${#missing[@]} -ne 0 ]; then
+                echo "Still missing after install, install these and re-run:"
+                printf '  - %s\n' "${missing[@]}"
+                exit 1
+            fi
+            echo "==> Dependencies installed."
+        else
+            echo "Install these and re-run."
+            exit 1
+        fi
     fi
 
     # Optional, soft-checked: only needed for the opt-in "try this app's own

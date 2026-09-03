@@ -57,7 +57,7 @@ The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is por
 - `omarchy-shell` (part of Omarchy)
 - `ydotool` + a running `ydotoold` - soft/optional, only needed for the opt-in native-overlay fallback
 
-`install.sh` checks for all of these (the first four are hard requirements; `ydotool` is checked at runtime instead, since it's only needed if you actually use the fallback).
+`install.sh` checks for all of these (the first four are hard requirements; `ydotool` is checked at runtime instead, since it's only needed if you actually use the fallback). If `python-gobject`, `at-spi2-core`, or `python-dbus` are missing, it offers to install them with `pacman` (asks first, shows the exact command). `hyprctl`/`busctl`/`omarchy-shell` are never auto-installed - missing any of those means this isn't actually running on Omarchy/Hyprland, which is outside what the installer should try to fix for you.
 
 ## Removal
 
