@@ -57,7 +57,7 @@ The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is por
 - `omarchy-shell` (part of Omarchy)
 - `ydotool` + a running `ydotoold` - soft/optional, only needed for the opt-in native-overlay fallback
 
-`install.sh` checks for all of these (the first four are hard requirements; `ydotool` is checked at runtime instead, since it's only needed if you actually use the fallback). If `python-gobject`, `at-spi2-core`, or `python-dbus` are missing, it offers to install them with `pacman` (asks first, shows the exact command). `hyprctl`/`busctl`/`omarchy-shell` are never auto-installed - missing any of those means this isn't actually running on Omarchy/Hyprland, which is outside what the installer should try to fix for you.
+`install.sh` checks for all of these (the first four are hard requirements; `ydotool` is checked separately, since it's only needed if you actually use the fallback). If `python-gobject`, `at-spi2-core`, `python-dbus`, or `ydotool` are missing, it offers to install them with `pacman` (asks first, shows the exact command) - `ydotool` is still optional even so, declining just leaves the fallback unavailable rather than failing the install. `hyprctl`/`busctl`/`omarchy-shell` are never auto-installed - missing any of those means this isn't actually running on Omarchy/Hyprland, which is outside what the installer should try to fix for you. `ydotoold` itself is checked at runtime instead of install time, since it's commonly started by another tool rather than at boot.
 
 ## Removal
 
@@ -81,6 +81,8 @@ Largely identical to upstream - this is mostly a property of each app's toolkit 
 - **Works via the opt-in native-overlay fallback:** GNOME/libadwaita header-bar-only apps with their own `Ctrl+Shift+/` shortcuts dialog (Nautilus - verified). See "Native-overlay fallback" below - this only ever runs when the user explicitly asks for it from the empty state, never automatically.
 - **Won't work at all:** Electron apps (Obsidian - verified: registers with AT-SPI but exposes nothing walkable even with Chromium's `--force-renderer-accessibility` flag forced on, tested live; same toolkit-level gap as upstream's finding for VS Code/Discord/Slack/Teams/Spotify). No fallback exists for these - see HANDOVER.md for what was tried.
 - **Terminals, narrowly:** AT-SPI has nothing to say about what's actually running inside a terminal emulator. If the focused window is a known terminal and the normal AT-SPI path finds nothing, kheetsheet checks whether `nvim` or `tmux` is running as a child process of that terminal (real `/proc` process-tree walk, never reads terminal content/scrollback) and shows a small built-in keymap for whichever it finds, labeled "· built-in keymap" so it's clearly not the app's own real data. Deliberately narrow - not a general per-app catalog.
+
+The idea to walk `/proc`'s child tree was blatantly stolen from [fze-fze/omarchy-shortcut-sheet](https://github.com/fze-fze/omarchy-shortcut-sheet). That plugin does a similar thing to kheetsheet, but also includes all the system shortcuts. Give it a whirl if you think you'd prefer it.
 
 Building an app and want it to show up here? See [COMPATIBILITY.md](COMPATIBILITY.md) for what kheetsheet actually looks for and how to add it, toolkit by toolkit.
 

@@ -298,6 +298,21 @@ require_deps() {
         echo "  overlay\" fallback won't be available (everything else will work fine)."
         echo "  Whether ydotoold is actually running is checked at runtime instead,"
         echo "  since it's commonly started by other tools rather than at boot."
+        if command -v pacman >/dev/null 2>&1; then
+            read -r -p "  Install ydotool now with pacman? [y/N] " reply
+            case "$reply" in
+                [yY]|[yY][eE][sS])
+                    sudo pacman -S --needed ydotool
+                    if command -v ydotool >/dev/null 2>&1; then
+                        echo "  ydotool installed - you'll still need ydotoold running for the fallback to work (see README)."
+                    else
+                        echo "  Still not found after install - the fallback will stay unavailable."
+                    fi
+                    ;;
+                *)
+                    ;;
+            esac
+        fi
     fi
 }
 

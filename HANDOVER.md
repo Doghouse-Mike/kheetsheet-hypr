@@ -28,6 +28,11 @@ Deliberately **not** auto-installable: `hyprctl`/`busctl`/`omarchy-shell`. If an
 
 **Not done:** the "still missing after a successful-exit-code pacman run" branch (line count aside, this is the one path the harness didn't distinctly exercise - the harness's "no" test and "yes" test both landed on the two designed outcomes, not the third). Low risk (same five checks, already exercised individually in session 11's own dependency-check code), but noting it since it's untested code.
 
+**Same session, follow-up:** two more items bundled in before the marketplace re-review was reset, both previously deferred:
+
+- **`ydotool` auto-install offer.** Mike hit a from-scratch install on the laptop where `ydotool` was missing and the soft-check note was all `install.sh` gave him. Added the same consented-`pacman`-install offer as the hard deps above, but non-blocking either way (declining, or no `pacman`, just leaves the existing note) since `ydotool` stays optional. Verified with the same mocked-`PATH` harness technique as above, this time fully isolated (`env -i PATH=<minimal coreutils symlinks>:<mocks>`, since the machine's real `ydotool` in `/usr/bin` was shadowing the "missing" case the first time this was tried with a merely-prepended `PATH`): confirmed both the yes-path (mock `pacman`/`sudo` "installs" it, script reports success) and the no-path (note only, exits 0, doesn't block the rest of the install) behave as designed.
+- **Attribution credit** for the `/proc` child-tree-walk idea, added under "App compatibility" next to the terminal-fallback bullet, using Mike's own wording from 2026-09-02: credits [fze-fze/omarchy-shortcut-sheet](https://github.com/fze-fze/omarchy-shortcut-sheet) as the source of the idea (not a license obligation - MIT protects code, not the idea - a courtesy credit Mike asked for explicitly).
+
 ## Session 11: fixed all six marketplace review blockers, added the terminal `/proc` fallback
 
 Re-review of the marketplace submission (`omacom/omarchy-plugin-marketplace#3934`) at HEAD `81a541b` came back with six blocking findings and kept `needs-fixes`/`manual-setup`/`security-review-required`. Fixed all six directly, plus (at Mike's request, folded into the same pass) the nvim/tmux terminal fallback that the 2026-09-02 note above had recorded as "approved in principle, not yet implemented."
