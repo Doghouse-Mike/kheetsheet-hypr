@@ -53,12 +53,18 @@ class KheetSheetService(dbus.service.Object):
         # Short-lived, single-use capability minted by GetShortcuts() and
         # required by InvokeShortcut/TryNativeOverlay - see _consume_token.
         # Neither the D-Bus session-bus name nor the object path is secret,
-        # so without this, any process on the same session bus could invoke
-        # whatever's cached here, or fire a synthetic keypress, at a moment
-        # of its own choosing.
-        self._session = {"token": None, "pid": None, "created": 0.0}
+        # and the token alone isn't either: it's returned from a method any
+        # session-bus client can call, so it also has to be bound to the
+        # unique bus name (`sender`, e.g. ":1.234") of whichever client
+        # called GetShortcuts() - libdbus/dbus-daemon stamps this on every
+        # message itself, a caller cannot forge someone else's. Without that
+        # bind, any other process on the bus could grab a token meant for
+        # kheetsheet's own QML panel (by watching D-Bus traffic, or simply
+        # calling GetShortcuts() itself right after) and use it to invoke
+        # whatever's cached here, or fire a synthetic keypress, on its own.
+        self._session = {"token": None, "pid": None, "sender": None, "created": 0.0}
 
-    def _consume_token(self, token):
+    def _consume_token(self, token, sender):
         # "Current target identity" is enforced structurally, not by a live
         # recheck here: both callers act on what was *recorded* at
         # GetShortcuts() time (self._last_accessibles / self._last_pid), not
@@ -72,18 +78,24 @@ class KheetSheetService(dbus.service.Object):
         now = time.monotonic()
         if not token_still_valid(self._session, token, now):
             return False
+        # The caller's identity has to match too, not just the token value -
+        # otherwise anyone who could observe or independently mint a token
+        # (see the comment in __init__) could still use it.
+        if not sender or self._session.get("sender") != sender:
+            return False
         # Single-use: a successful check burns the token immediately, before
         # the caller's actual side effect runs.
         self._session["token"] = None
         return True
 
-    @dbus.service.method(IFACE, in_signature="", out_signature="s")
-    def GetShortcuts(self):
+    @dbus.service.method(IFACE, in_signature="", out_signature="s", sender_keyword="sender")
+    def GetShortcuts(self, sender=None):
         pid, app_id = get_active_window()
         self._last_pid, self._last_app_id = pid, app_id
         self._session = {
             "token": make_session_token(),
             "pid": pid,
+            "sender": sender,
             "created": time.monotonic(),
         }
         if pid is None:
@@ -119,16 +131,16 @@ class KheetSheetService(dbus.service.Object):
             payload["source"] = source
         return json.dumps(payload)
 
-    @dbus.service.method(IFACE, in_signature="si", out_signature="b")
-    def InvokeShortcut(self, token, index):
-        if not self._consume_token(token):
+    @dbus.service.method(IFACE, in_signature="si", out_signature="b", sender_keyword="sender")
+    def InvokeShortcut(self, token, index, sender=None):
+        if not self._consume_token(token, sender):
             return False
         if index < 0 or index >= len(self._last_accessibles):
             return False
         return invoke_shortcut(self._last_accessibles[index])
 
-    @dbus.service.method(IFACE, in_signature="s", out_signature="s")
-    def TryNativeOverlay(self, token):
+    @dbus.service.method(IFACE, in_signature="s", out_signature="s", sender_keyword="sender")
+    def TryNativeOverlay(self, token, sender=None):
         # Explicit, user-triggered only (see HANDOVER.md for the full
         # reasoning) - this is the one path in the whole project that
         # injects real synthetic input rather than only reading AT-SPI.
@@ -146,7 +158,7 @@ class KheetSheetService(dbus.service.Object):
         # locale-independent value the QML side actually displays (see
         # Kheetsheet.qml's resolveDaemonError() / i18n.js) - never add a
         # translated string here, that would defeat the point.
-        if not self._consume_token(token):
+        if not self._consume_token(token, sender):
             return json.dumps({
                 "app": self._last_app_id, "ok": False,
                 "error": "this request is no longer valid - reopen the panel and try again",

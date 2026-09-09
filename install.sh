@@ -67,103 +67,209 @@ a11y_set_enabled() {
 
 # Atomic, symlink-safe, mode-preserving write: refuses to write through a
 # symlink or over a non-regular file, writes to a temp file in the same
-# directory, fsyncs it, then os.replace()s it into place - which unlinks
-# the destination name rather than following it, so this is still safe even
-# if something planted a symlink at $1 between the check and the write.
+# directory, fsyncs it, then replaces it into place.
+#
+# Unlike a naive "check the path, then reopen/replace the same path string"
+# sequence (which a symlink or rename planted at any ancestor component
+# between the check and the write could silently redirect), every operation
+# here after the initial directory open happens relative to a single
+# directory file descriptor (`dir_fd`) captured once - so a later swap of
+# what the *path* `dest_dir` resolves to can't change what this is actually
+# writing into. The existing destination name is opened with O_NOFOLLOW (a
+# symlink there raises ELOOP instead of being silently followed), and the
+# final replace re-checks that name still names the exact inode just
+# inspected - bound to what was actually opened - immediately beforehand,
+# so a swap racing the write itself is refused rather than clobbered.
 atomic_write() {
     local dest="$1" content_path="$2"
     python3 - "$dest" "$content_path" <<'PYEOF'
+import errno
 import os
+import secrets
 import stat
 import sys
-import tempfile
 
 dest, content_path = sys.argv[1], sys.argv[2]
 with open(content_path, "rb") as f:
     content = f.read()
 
-mode = 0o644
-if os.path.exists(dest):
-    if os.path.islink(dest):
-        print(f"Refusing to write through symlink: {dest}", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.isfile(dest):
-        print(f"Refusing to overwrite non-regular file: {dest}", file=sys.stderr)
-        sys.exit(1)
-    mode = stat.S_IMODE(os.stat(dest).st_mode)
-
 dest_dir = os.path.dirname(dest) or "."
+name = os.path.basename(dest)
 os.makedirs(dest_dir, exist_ok=True)
-fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".kheetsheet-tmp-")
+
+dir_fd = os.open(dest_dir, os.O_RDONLY | os.O_DIRECTORY)
 try:
-    with os.fdopen(fd, "wb") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    os.chmod(tmp_path, mode)
-    os.replace(tmp_path, dest)
-except Exception:
+    mode = 0o644
+    old_identity = None
     try:
-        os.unlink(tmp_path)
-    except OSError:
-        pass
-    raise
+        # O_NONBLOCK matters here: without it, opening a FIFO planted at
+        # `name` for read would hang this script forever waiting for a
+        # writer (a self-inflicted DoS on whatever's blocked behind this
+        # install/uninstall step). It's a no-op for the regular files this
+        # is actually meant to open.
+        existing_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except FileNotFoundError:
+        existing_fd = None
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            print(f"Refusing to write through symlink: {dest}", file=sys.stderr)
+            sys.exit(1)
+        raise
+
+    if existing_fd is not None:
+        try:
+            st = os.fstat(existing_fd)
+            if not stat.S_ISREG(st.st_mode):
+                print(f"Refusing to overwrite non-regular file: {dest}", file=sys.stderr)
+                sys.exit(1)
+            mode = stat.S_IMODE(st.st_mode)
+            old_identity = (st.st_dev, st.st_ino)
+        finally:
+            os.close(existing_fd)
+
+    tmp_name = f".kheetsheet-tmp-{secrets.token_hex(8)}"
+    tmp_fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=dir_fd)
+    try:
+        with os.fdopen(tmp_fd, "wb") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_name, mode, dir_fd=dir_fd)
+
+        try:
+            new_st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            new_identity = (new_st.st_dev, new_st.st_ino) if stat.S_ISREG(new_st.st_mode) else None
+        except FileNotFoundError:
+            new_identity = None
+        if new_identity != old_identity:
+            print(f"{dest} changed underneath us - aborting to avoid a lost update or redirect", file=sys.stderr)
+            sys.exit(1)
+
+        os.replace(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+finally:
+    os.close(dir_fd)
 PYEOF
 }
 
 # Adds/removes the plugin's entry in shell.json. $1 is "add" or "remove".
+#
+# Self-contained, like atomic_write above: everything (the existence/symlink
+# check, the read, the transform, and the final replace) happens against a
+# single directory fd and a single opened-by-fd identity for $SHELL_JSON,
+# rather than a bash path check followed by a separate python read followed
+# by yet another path-based atomic_write - each of those re-resolutions was
+# its own chance for an ancestor swap to redirect the write, or for a
+# concurrent legitimate writer's update to get silently discarded.
 update_shell_json() {
     local action="$1"
-    if [ ! -f "$SHELL_JSON" ] || [ -L "$SHELL_JSON" ]; then
-        if [ "$action" = "add" ]; then
-            echo "Refusing to touch $SHELL_JSON (missing, or a symlink)." >&2
-            exit 1
-        fi
-        return 0
-    fi
-    local scratch
-    scratch="$(mktemp)"
-    python3 - "$SHELL_JSON" "$PLUGIN_ID" "$scratch" "$action" <<'PYEOF'
+    python3 - "$SHELL_JSON" "$PLUGIN_ID" "$action" <<'PYEOF'
+import errno
 import json
+import os
+import secrets
+import stat
 import sys
 
-path, plugin_id, scratch_path, action = sys.argv[1:5]
+path, plugin_id, action = sys.argv[1:4]
 MAX_BYTES = 5 * 1024 * 1024
 
-with open(path, "r") as f:
-    raw = f.read(MAX_BYTES + 1)
-if len(raw) > MAX_BYTES:
-    print(f"{path} is larger than expected ({MAX_BYTES} bytes) - refusing to touch it", file=sys.stderr)
-    sys.exit(1)
+dest_dir = os.path.dirname(path) or "."
+name = os.path.basename(path)
 
-config = json.loads(raw)
-plugins = config.get("plugins", [])
 
-if action == "add":
-    if not any(p.get("id") == plugin_id for p in plugins):
+def refuse_missing_or_symlink():
+    if action == "add":
+        print(f"Refusing to touch {path} (missing, or a symlink).", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
+
+try:
+    dir_fd = os.open(dest_dir, os.O_RDONLY | os.O_DIRECTORY)
+except FileNotFoundError:
+    refuse_missing_or_symlink()
+
+try:
+    try:
+        # O_NONBLOCK: a FIFO planted at `name` would otherwise hang this
+        # open() forever waiting for a writer. No-op on the regular file
+        # this is actually meant to open.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except FileNotFoundError:
+        refuse_missing_or_symlink()
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            refuse_missing_or_symlink()
+        raise
+
+    f = os.fdopen(fd, "rb")
+    try:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            refuse_missing_or_symlink()
+        old_identity = (st.st_dev, st.st_ino)
+        mode = stat.S_IMODE(st.st_mode)
+        raw = f.read(MAX_BYTES + 1)
+    finally:
+        f.close()
+
+    if len(raw) > MAX_BYTES:
+        print(f"{path} is larger than expected ({MAX_BYTES} bytes) - refusing to touch it", file=sys.stderr)
+        sys.exit(1)
+
+    config = json.loads(raw)
+    plugins = config.get("plugins", [])
+
+    if action == "add":
+        if any(p.get("id") == plugin_id for p in plugins):
+            print(f"  {plugin_id} already present in shell.json")
+            sys.exit(0)
         config["plugins"] = plugins + [{"id": plugin_id}]
-        with open(scratch_path, "w") as f:
-            json.dump(config, f, indent=2)
-            f.write("\n")
-        print(f"  Added {plugin_id} to shell.json")
+        message = f"  Added {plugin_id} to shell.json"
     else:
-        with open(scratch_path, "w") as f:
-            f.write(raw)
-        print(f"  {plugin_id} already present in shell.json")
-else:
-    new_plugins = [p for p in plugins if p.get("id") != plugin_id]
-    if new_plugins != plugins:
+        new_plugins = [p for p in plugins if p.get("id") != plugin_id]
+        if new_plugins == plugins:
+            sys.exit(0)
         config["plugins"] = new_plugins
-        with open(scratch_path, "w") as f:
-            json.dump(config, f, indent=2)
-            f.write("\n")
-        print(f"  Removed {plugin_id} from shell.json")
-    else:
-        with open(scratch_path, "w") as f:
-            f.write(raw)
+        message = f"  Removed {plugin_id} from shell.json"
+
+    new_content = (json.dumps(config, indent=2) + "\n").encode()
+
+    tmp_name = f".kheetsheet-tmp-{secrets.token_hex(8)}"
+    tmp_fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=dir_fd)
+    try:
+        with os.fdopen(tmp_fd, "wb") as tf:
+            tf.write(new_content)
+            tf.flush()
+            os.fsync(tf.fileno())
+        os.chmod(tmp_name, mode, dir_fd=dir_fd)
+
+        try:
+            new_st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            still_same = stat.S_ISREG(new_st.st_mode) and (new_st.st_dev, new_st.st_ino) == old_identity
+        except FileNotFoundError:
+            still_same = False
+        if not still_same:
+            print(f"{path} changed underneath us - aborting to avoid a lost update or redirect", file=sys.stderr)
+            sys.exit(1)
+
+        os.replace(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+    print(message)
+finally:
+    os.close(dir_fd)
 PYEOF
-    atomic_write "$SHELL_JSON" "$scratch"
-    rm -f "$scratch"
 }
 
 # --- uninstall --------------------------------------------------------------
