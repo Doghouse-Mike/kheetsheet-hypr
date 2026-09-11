@@ -38,15 +38,7 @@ omarchy-shell shell toggle doghouse-mike.kheetsheet '{}'
 
 ## Status
 
-Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2) and a separate, definite "potato" class laptop running the same setup. Not yet packaged for general install beyond `install.sh`. See `HANDOVER.md` for full development history, decisions, and open items.
-
-## How it's different from upstream
-
-- **No KWin script.** Hyprland's active-window state is queried on demand via `hyprctl activewindow` at the moment the overlay opens, instead of being pushed continuously by a compositor script. Confirmed live that a Quickshell layer-shell overlay never shows up as Hyprland's "active window" even while it holds exclusive keyboard focus, so there's no race between the overlay opening and this query.
-- **No PyQt6 / no Qt in the daemon at all.** The daemon is a pure D-Bus backend (AT-SPI + a GLib mainloop); the overlay itself is a native Omarchy Quickshell plugin (`manifest.json` + `Kheetsheet.qml`, at the repo root), which speaks `wlr-layer-shell` natively - no XWayland workaround needed (upstream needs one, because Qt-Wayland windows don't honour always-on-top/positioning under KWin).
-- **D-Bus interface is pull-based**: `GetShortcuts() -> JSON` (which includes a short-lived, single-use capability token) and `InvokeShortcut(token, index) -> bool`, called by the plugin's QML rather than the daemon pushing to its own in-process overlay.
-
-The actual AT-SPI extraction logic (`daemon/kheetsheet_hyprd/service.py`) is ported near-verbatim from upstream - it was already 100% compositor-independent.
+Early / in development. The daemon and plugin both work end-to-end on the machine this was built and tested on (Omarchy 4.0.1, Hyprland 0.56.2) and a separate, definite "potato" class laptop running the same setup. Not yet packaged for general install beyond `install.sh`. 
 
 ## Dependencies
 
@@ -75,11 +67,11 @@ Press your bound hotkey to show the current app's shortcuts; press it again or h
 
 ## App compatibility
 
-Largely identical to upstream - this is mostly a property of each app's toolkit and how much it exposes to the accessibility tree, not of the compositor. Confirmed directly on Hyprland during development:
+Relies on each app's toolkit and how much it exposes to the accessibility tree, not of the compositor.
 
 - **Works well, via the normal AT-SPI menu path:** Qt/KDE Frameworks apps with a real menu bar (Okular, qBittorrent - both verified with real, complete shortcut lists including nested submenus). Also expected to work: Dolphin, Kate, Konsole, KCalc, Krita, LibreOffice, older GTK apps with a traditional menu bar (GIMP 2.x).
 - **Works via the opt-in native-overlay fallback:** GNOME/libadwaita header-bar-only apps with their own `Ctrl+Shift+/` shortcuts dialog (Nautilus - verified). See "Native-overlay fallback" below - this only ever runs when the user explicitly asks for it from the empty state, never automatically.
-- **Won't work at all:** Electron apps (Obsidian - verified: registers with AT-SPI but exposes nothing walkable even with Chromium's `--force-renderer-accessibility` flag forced on, tested live; same toolkit-level gap as upstream's finding for VS Code/Discord/Slack/Teams/Spotify). No fallback exists for these - see HANDOVER.md for what was tried.
+- **Won't work at all:** Electron apps (Obsidian - verified: registers with AT-SPI but exposes nothing walkable even with Chromium's `--force-renderer-accessibility` flag forced on, tested live; same toolkit-level gap found for VS Code/Discord/Slack/Teams/Spotify). No fallback exists for these
 - **Terminals, narrowly:** AT-SPI has nothing to say about what's actually running inside a terminal emulator. If the focused window is a known terminal and the normal AT-SPI path finds nothing, kheetsheet checks whether `nvim` or `tmux` is running as a child process of that terminal (real `/proc` process-tree walk, never reads terminal content/scrollback) and shows a small built-in keymap for whichever it finds, labeled "· built-in keymap" so it's clearly not the app's own real data. Deliberately narrow - not a general per-app catalog.
 
 The idea to walk `/proc`'s child tree was blatantly stolen from [fze-fze/omarchy-shortcut-sheet](https://github.com/fze-fze/omarchy-shortcut-sheet). That plugin does a similar thing to kheetsheet, but also includes all the system shortcuts. Give it a whirl if you think you'd prefer it.
@@ -91,13 +83,13 @@ Building an app and want it to show up here? See [COMPATIBILITY.md](COMPATIBILIT
 For apps with no exposed menu at all, the "no shortcuts found" state offers a link: "Try {app}'s own shortcuts overlay." Only if the user clicks it (or presses Enter on that empty state), the daemon:
 
 1. Refocuses the app that was focused before the overlay opened.
-2. Sends it a real synthetic `Ctrl+Shift+/` via `ydotool` (kernel-level `uinput` injection - **not** `wtype`/the Wayland virtual-keyboard protocol, which was tried first and turned out to be unreliable in practice: it worked once, then silently failed to trigger the same app's dialog on every retry afterward, across fresh app instances and varied timing. `ydotool` worked consistently on every attempt).
+2. Sends it a real synthetic `Ctrl+Shift+/` via `ydotool` (kernel-level `uinput` injection)
 
-That's it - kheetsheet's own panel hides itself first (releasing the exclusive Wayland keyboard focus it normally holds, so the synthetic keypress actually reaches the target app instead of being swallowed here) and stays out of the way. Whatever native "Keyboard Shortcuts" dialog the app then shows is left on screen exactly as the app renders it - unthemed, in the app's own styling - for the user to read and close themselves. Kheetsheet does not scrape, parse, or re-render it; it only reopens itself if the attempt failed outright (e.g. `ydotool` missing, or the window couldn't be refocused), to report why.
+That's it - kheetsheet's own panel hides itself first (releasing the exclusive Wayland keyboard focus it normally holds, so the synthetic keypress actually reaches the target app instead of being swallowed here) and stays out of the way. Whatever native "Keyboard Shortcuts" dialog the app then shows is left on screen exactly as the app renders it in that app's own styling - for the user to read and close themselves. Kheetsheet does not scrape, parse, or re-render it; it only reopens itself if the attempt failed outright (e.g. `ydotool` missing, or the window couldn't be refocused), to report why.
 
 Detecting whether the dialog actually appeared has to check two different things, since apps present it differently: a new toplevel window (older convention, `hyprctl clients` diff) or an in-window `AdwDialog` (newer GNOME/libadwaita convention - confirmed on Nautilus, GNOME 50+), the latter via a bounded AT-SPI check for the mere *presence* of a `dialog`-role node - never its name or contents, same "structure, not content" rule as everywhere else in this project.
 
-This is the one piece of the whole project that injects real input rather than only reading AT-SPI passively, and it exists because [kheetsheet's own author already considered and rejected doing this automatically](https://28mm.coffee/the-reasoning-behind-kheetsheet) ("faking keypresses (creepy), performance hits, and weird vanishing window behaviour"). Making it explicit and user-triggered, and leaving the app's own dialog on screen rather than trying to fake it in this project's own styling, doesn't erase that reasoning - it's a different, smaller claim: *you* asked for this specific action, this once, and what you see afterward is honestly the app's own overlay, not kheetsheet's. Requires `ydotool` + a running `ydotoold` (soft dependency - checked at runtime, not required to install everything else). Also a practical benefit: because this app's own unthemed dialog looks visibly different from kheetsheet's own styled overlay, it's an easy visual tell for "this app has no AT-SPI menu support" versus "this app is fully supported."
+This is the *one* piece of the whole project that injects real input rather than only reading AT-SPI passively, and it exists because [I already considered and rejected doing this automatically](https://28mm.coffee/the-reasoning-behind-kheetsheet) ("faking keypresses (creepy), performance hits, and weird vanishing window behaviour"). Making it explicit and user-triggered, and leaving the app's own dialog on screen rather than trying to fake it in this project's own styling, doesn't erase that reasoning - it's a different, smaller claim: *you* asked for this specific action, this once, and what you see afterward is honestly the app's own overlay, not kheetsheet's. Requires `ydotool` + a running `ydotoold` (soft dependency - checked at runtime, not required to install everything else). Also a practical benefit: because this app's own unthemed dialog looks visibly different from kheetsheet's own styled overlay, it's an easy visual tell for "this app has no AT-SPI menu support" versus "this app is fully supported."
 
 ## Architecture
 
